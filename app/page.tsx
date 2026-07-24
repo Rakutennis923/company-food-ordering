@@ -70,7 +70,7 @@ export default function OrderingApp() {
   const [stores, setStores] = useLocalState<Store[]>("food-stores-v3", seedStores);
   const [orders, setOrders] = useLocalState<Order[]>("food-current-orders-v3", []);
   const [history, setHistory] = useLocalState<ClosedOrder[]>("food-order-history-v3", []);
-  const [selectedIds, setSelectedIds] = useState<string[]>([]);
+  const [selectedIds, setSelectedIds] = useState<string[]>(seedStores.map(store => store.id));
   const [winnerId, setWinnerId] = useState("");
   const [spinning, setSpinning] = useState(false);
   const [highlightId, setHighlightId] = useState("");
@@ -98,6 +98,12 @@ export default function OrderingApp() {
   const activeStore = winner || (selectedIds.length === 1 ? stores.find(s => s.id === selectedIds[0]) : undefined);
   const selectedItem = activeStore?.menu.find(m => m.id === itemId);
   const currentTotal = orders.reduce((sum, order) => sum + order.price * order.qty, 0);
+  const selectedStores = stores.filter(store => selectedIds.includes(store.id)).slice(0, 8);
+  const storeEmoji = (store: Store) =>
+    store.category.includes("麵") ? "🍜" :
+    store.category.includes("越") ? "🍲" :
+    store.category.includes("韓") ? "🥘" :
+    store.category.includes("咖哩") ? "🍛" : "🍽️";
 
   useEffect(() => {
     if (selectedIds.length === 1) setWinnerId(selectedIds[0]);
@@ -234,38 +240,87 @@ export default function OrderingApp() {
   return (
     <main>
       <header className="topbar">
-        <div>
-          <p className="eyebrow">友成幸福團隊</p>
-          <h1>今天吃什麼？</h1>
-          <p className="subtitle">公司訂餐系統 · 八德大湳生活圈</p>
+        <div className="brand">
+          <div className="brand-logo"><span>🐹</span><b>餃子</b></div>
+          <div>
+            <h1>友成幸福團隊・公司訂餐</h1>
+            <p className="subtitle">📍 桃園市八德區大智路73號・500公尺美食圈</p>
+          </div>
         </div>
         <nav>
-          <button className={tab==="order"?"active":""} onClick={()=>setTab("order")}>開始點餐</button>
-          <button className={tab==="stores"?"active":""} onClick={()=>setTab("stores")}>店家管理</button>
-          <button className={tab==="history"?"active":""} onClick={()=>setTab("history")}>點餐紀錄</button>
-          <button className={tab==="settings"?"active":""} onClick={()=>setTab("settings")}>設定</button>
+          <button className={tab==="order"?"active":""} onClick={()=>setTab("order")}>⌂ 今日訂餐</button>
+          <button className={tab==="history"?"active":""} onClick={()=>setTab("history")}>▣ 訂餐紀錄</button>
+          <button className={tab==="stores"?"active":""} onClick={()=>setTab("stores")}>♟ 團隊成員</button>
+          <button className={tab==="settings"?"active":""} onClick={()=>setTab("settings")}>⚙ 系統設定</button>
         </nav>
       </header>
 
       {toast && <div className="toast">{toast}</div>}
 
       {tab === "order" && <div className="page">
-        <section className="hero-card">
-          <div className="section-title"><div><span>STEP 01</span><h2>同事開始點餐</h2></div><b>{selectedIds.length}/8 間</b></div>
-          <div className="filters">
-            {["全部餐期","早餐","中餐","晚餐"].map(x=><button key={x} className={mealFilter===x?"selected":""} onClick={()=>setMealFilter(x)}>{x}</button>)}
-            {[3,4].map(x=><button key={x} className={ratingFilter===x?"selected":""} onClick={()=>setRatingFilter(x)}>★ {x}.0以上</button>)}
+        <section className="neon-hero">
+          <div className="hero-heading">
+            <h2>☆ 今日午餐選店 ☆</h2>
+            <p>值班人員在下方選擇 2～8 家即可抽選；只選 1 家就直接開放點餐。</p>
           </div>
-          <div className="store-strip">
-            {visibleStores.map(store=><button key={store.id} className={`store-pill ${selectedIds.includes(store.id)?"chosen":""} ${highlightId===store.id?"lit":""} ${winnerId===store.id?"winner":""}`} onClick={()=>toggleStore(store.id)}>
-              <i>{selectedIds.includes(store.id)?"✓":"＋"}</i><span>{store.name}</span><small>★ {store.rating.toFixed(1)} · {store.category}</small>
-            </button>)}
+          <div className="marquee-wrap">
+            <aside className="side-sign left">好<br/>吃<br/>才<br/>是<br/>王</aside>
+            <div className="marquee">
+              {selectedStores.map(store=><article key={store.id} className={`stage-store ${highlightId===store.id?"lit":""} ${winnerId===store.id?"winner":""}`} onClick={()=>toggleStore(store.id)}>
+                <b className="stage-check">✓</b>
+                <div className="food-icon">{storeEmoji(store)}</div>
+                <div className="stage-copy">
+                  <h3>{store.name}</h3>
+                  <p><strong>★ {store.rating.toFixed(1)}</strong><span>{120 + Number(store.id.slice(1)) * 37}m</span></p>
+                  <div><em>{store.category}</em><em className="maps">Maps</em></div>
+                  <small>☎ 電話　⌖ 地圖　▤ 菜單</small>
+                </div>
+              </article>)}
+            </div>
+            <aside className="side-sign right">吃<br/>飽<br/>才<br/>有<br/>戰<br/>鬥<br/>力</aside>
           </div>
-          <div className="draw-row">
-            <div><label>值班人員<input value={duty} onChange={e=>setDuty(e.target.value)} placeholder="請輸入姓名"/></label><label>點餐截止<input type="time" value={deadline} onChange={e=>setDeadline(e.target.value)}/></label></div>
-            <button className="spin" disabled={selectedIds.length<2||spinning} onClick={spin}>{spinning?"選店中…":"啟動選店"}</button>
+          <div className="draw-stage">
+            <span>≫≫≫</span>
+            <button className="spin" disabled={selectedIds.length<2||spinning} onClick={spin}>{spinning?"抽選中…":"啟動抽選"}</button>
+            <span>≪≪≪</span>
+            <small>5–7 秒隨機抽選</small>
           </div>
-          {selectedIds.length===1 && <p className="hint">只選一間代表直接指定，不需啟動隨機選店。</p>}
+        </section>
+
+        <section className="stats-row">
+          <div><span>👥</span><p>已點餐<strong>{orders.length} 人</strong></p></div>
+          <div><span>🧑‍🤝‍🧑</span><p>候選店家<strong>{selectedIds.length} 家</strong></p></div>
+          <div><span>👛</span><p>目前總額<strong>{money(currentTotal)}</strong></p></div>
+          <div><span>◷</span><p>今日截止<strong>{deadline}</strong></p></div>
+        </section>
+
+        <section className="dashboard-grid">
+          <div className="panel selection-panel">
+            <div className="section-title"><div><span>01</span><h2>同事開始點餐</h2></div><p>值班人員先選 1～8 家店</p></div>
+            <div className="filters">
+              <small>餐期</small>
+              {["全部餐期","早餐","中餐","晚餐"].map(x=><button key={x} className={mealFilter===x?"selected":""} onClick={()=>setMealFilter(x)}>{x}</button>)}
+              <small>評分</small>
+              {[3,4].map(x=><button key={x} className={ratingFilter===x?"selected":""} onClick={()=>setRatingFilter(x)}>★ {x}.0以上</button>)}
+              <b>目前顯示 {visibleStores.length} 家</b>
+            </div>
+            <div className="store-strip">
+              {visibleStores.map(store=><button key={store.id} className={`store-pill ${selectedIds.includes(store.id)?"chosen":""} ${highlightId===store.id?"lit":""} ${winnerId===store.id?"winner":""}`} onClick={()=>toggleStore(store.id)}>
+                <i>{selectedIds.includes(store.id)?"✓":"＋"}</i><span>{storeEmoji(store)} {store.name}</span>
+              </button>)}
+            </div>
+            <div className="draw-row">
+              <p>已選 <strong>{selectedIds.length}</strong> 家，可按上方啟動抽選</p>
+              <div><label>值班人員<input value={duty} onChange={e=>setDuty(e.target.value)} placeholder="選擇姓名"/></label><label>點餐截止<input type="time" value={deadline} onChange={e=>setDeadline(e.target.value)}/></label></div>
+            </div>
+            <p className="sync-note">♧ 已同步 {stores.length} 家店與 {stores.reduce((sum, store)=>sum+store.menu.length,0)} 個餐點</p>
+            <p className="price-warning"><b>價格提醒</b>　菜單內容與價格僅供點餐參考，店家可能調整售價；實際餐點、價格及供應狀況，以店家最新公告與當日確認結果為準。</p>
+          </div>
+          <div className="panel order-summary">
+            <div className="section-title"><div><span>02</span><h2>訂單自動統計</h2></div></div>
+            {!orders.length ? <div className="empty bowl"><b>🥣</b><span>還沒有人點餐<br/>第一份美味等你加入</span></div> : orders.map(o=><div className="order-row" key={o.id}><div><b>{o.staff}</b><span>{o.item} × {o.qty}{o.note&&` · ${o.note}`}</span></div><strong>{money(o.price*o.qty)}</strong><button onClick={()=>setOrders(orders.filter(x=>x.id!==o.id))}>×</button></div>)}
+            {!!orders.length && <><div className="total"><span>訂單總計</span><strong>{money(currentTotal)}</strong></div><button className="primary" onClick={closeOrder}>結單並保存紀錄</button></>}
+          </div>
         </section>
 
         {activeStore ? <section className="order-grid">
