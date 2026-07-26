@@ -204,6 +204,39 @@ export default function OrderingApp() {
       if (!silent) setSharedStatus("syncing");
       const result = await sharedApi("getSharedState", {date:todayText(),meal:"中餐"});
       const state = result.state || {};
+      const remoteStoreRows: Record<string,string>[] = state.stores || [];
+      const remoteMenuRows: Record<string,string>[] = state.menu || [];
+      if (remoteStoreRows.length) {
+        const sharedStores = remoteStoreRows.map(row => {
+          const storeId = String(row["店家ID"] || "");
+          return {
+            id: storeId,
+            name: String(row["店名"] || ""),
+            category: String(row["料理類型"] || "其他"),
+            rating: Number(row["Google評分"] || 0),
+            phone: String(row["電話"] || ""),
+            address: String(row["地址"] || ""),
+            meals: (["早餐","中餐","晚餐"] as const).filter(mealName => row[mealName] === "是"),
+            menu: remoteMenuRows
+              .filter(menuRow => String(menuRow["店家ID"] || "") === storeId)
+              .map(menuRow => ({
+                id: String(menuRow["菜單ID"] || ""),
+                name: String(menuRow["餐點名稱"] || ""),
+                price: Number(menuRow["價格"] || 0),
+              })),
+            active: true,
+          } satisfies Store;
+        }).filter(store => store.id && store.name);
+        if (sharedStores.length) setStores(sharedStores);
+      }
+      const remotePeople: Record<string,string>[] = state.people || [];
+      if (remotePeople.length) {
+        const sharedPeople = remotePeople.map(row => String(row["姓名"] || "")).filter(Boolean);
+        if (sharedPeople.length) {
+          setPeople(sharedPeople);
+          if (!sharedPeople.includes(staff)) setStaff(sharedPeople[0]);
+        }
+      }
       const daily = state.daily || null;
       if (daily) {
         const ids = String(daily["候選店家ID（以逗號分隔）"] || "").split(",").filter(Boolean);

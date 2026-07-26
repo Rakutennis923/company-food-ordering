@@ -193,6 +193,9 @@ function getSharedState(filters) {
   return {
     date:date,
     meal:meal,
+    stores:listStores({}),
+    menu:listMenu({}),
+    people:listPeople(),
     daily:getDaily({date:date,meal:meal}),
     orders:listOrders({date:date,meal:meal}),
     serverTime:new Date().toISOString()
