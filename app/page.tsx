@@ -53,6 +53,7 @@ const initialStaffNames = [
 ];
 const money = (value: number) => new Intl.NumberFormat("zh-TW", { style: "currency", currency: "TWD", maximumFractionDigits: 0 }).format(value);
 const nowLocal = () => new Date().toISOString();
+const normalizedStoreName = (name: string) => name.trim().replace(/\s+/g, "").toLocaleLowerCase("zh-TW");
 const todayText = () => {
   const now = new Date();
   return `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,"0")}-${String(now.getDate()).padStart(2,"0")}`;
@@ -407,9 +408,13 @@ export default function OrderingApp() {
     setHistory([record, ...history]); setOrders([]); flash("已結單並保存紀錄");
   }
 
-  function addManualStore() {
+  async function addManualStore() {
     const name = prompt("店家名稱");
     if (!name?.trim()) return;
+    if (stores.some(store => normalizedStoreName(store.name) === normalizedStoreName(name))) {
+      alert(`「${name.trim()}」已經在店家資料庫中，請勿重複新增。`);
+      return flash("店家名稱重複，沒有新增");
+    }
     const phone = prompt("電話（可留空）") || "";
     const address = prompt("地址（可留空）") || "";
     const rating = Number(prompt("Google 評分，例如 4.5") || 3.5);
@@ -418,13 +423,26 @@ export default function OrderingApp() {
       id: `S${Date.now()}`, name: name.trim(), phone, address, rating,
       category, meals: ["中餐", "晚餐"], menu: [], active: true,
     };
-    setStores([...stores, store]);
-    flash("已手動新增店家");
+    try {
+      if (apiUrl && apiToken) await api("saveStore", {data:{
+        "店家ID":store.id, "店名":store.name, "料理類型":store.category,
+        "早餐":"否", "中餐":"是", "晚餐":"是", "Google評分":store.rating,
+        "電話":store.phone || "", "地址":store.address || "", "啟用狀態":"啟用",
+      }});
+      setStores(current => [...current, store]);
+      flash(`已新增「${store.name}」，資料庫目前共 ${stores.length + 1} 間`);
+    } catch (error) {
+      flash(`新增失敗：${String((error as Error).message)}`);
+    }
   }
 
   function editStore(store: Store) {
     const name = prompt("店家名稱", store.name);
     if (!name?.trim()) return;
+    if (stores.some(item => item.id !== store.id && normalizedStoreName(item.name) === normalizedStoreName(name))) {
+      alert(`「${name.trim()}」已經在店家資料庫中，不能使用重複店名。`);
+      return flash("店家名稱重複，沒有修改");
+    }
     const phone = prompt("電話", store.phone || "") ?? store.phone;
     const address = prompt("地址", store.address || "") ?? store.address;
     const rating = Number(prompt("Google 評分", String(store.rating)) || store.rating);
@@ -586,9 +604,12 @@ export default function OrderingApp() {
   }
 
   async function saveSearchedStore(store: Store) {
-    const existing = stores.find(s => s.name === store.name && (s.address || "") === (store.address || ""));
-    const saved = {...store, id: existing?.id || `S${String(stores.length + 1).padStart(3,"0")}`, active:true};
-    setStores(current => existing ? current.map(s => s.id === existing.id ? {...s,...saved,id:s.id} : s) : [...current,saved]);
+    const existing = stores.find(s => normalizedStoreName(s.name) === normalizedStoreName(store.name));
+    if (existing) {
+      alert(`「${store.name}」已經在店家資料庫中，不會重複加入。`);
+      return flash("店家名稱重複，沒有新增");
+    }
+    const saved = {...store, id:`S${Date.now()}`, active:true};
     setMealFilter("全部餐期"); setRatingFilter(3); setSearchResults([]); setSearchName("");
     try {
       if (apiUrl && apiToken) await api("saveStore", { data: {
@@ -597,8 +618,9 @@ export default function OrderingApp() {
         "晚餐": saved.meals.includes("晚餐") ? "是":"否", "Google評分": saved.rating,
         "電話": saved.phone || "", "地址": saved.address || "", "啟用狀態":"啟用",
       }});
-      flash("已存入並加入店家清單");
-    } catch { flash("已先存入本機清單；連線後可再同步"); }
+      setStores(current => [...current,saved]);
+      flash(`已加入「${saved.name}」，資料庫目前共 ${stores.length + 1} 間`);
+    } catch (error) { flash(`新增失敗：${String((error as Error).message)}`); }
   }
 
   function deleteStore(id: string) {
@@ -807,9 +829,9 @@ export default function OrderingApp() {
         {managementView === "stores" && <>
         <section className="panel">
           <div className="section-title"><div><span>DATABASE</span><h2>店家搜尋與管理</h2></div><b>{stores.length} 間</b></div>
-          <p className="management-note">可透過 Google 地圖搜尋電話、地址與評分，或直接手動建立店家。</p>
+          <p className="management-note">店家資料庫不限數量；每天抽選時最多選擇 8 間。新增時會自動檢查重複店名。</p>
           <div className="search-row"><input value={searchName} onChange={e=>setSearchName(e.target.value)} onKeyDown={e=>e.key==="Enter"&&searchStore()} placeholder="輸入店家名稱，例如：東海排骨"/><button className="primary" onClick={searchStore}>Google 地圖搜尋</button><button className="secondary" onClick={addManualStore}>＋手動新增</button></div>
-          {searchResults.map(s=><div className="search-result" key={s.id}><div><b>{s.name}</b><span>★ {s.rating} · {s.category}</span><small>☎ {s.phone||"電話待補"}　⌖ {s.address||"地址待補"}</small></div><button className="primary" onClick={()=>saveSearchedStore(s)}>加入</button></div>)}
+          {searchResults.map(s=>{const duplicate=stores.some(store=>normalizedStoreName(store.name)===normalizedStoreName(s.name));return <div className={`search-result ${duplicate?"duplicate":""}`} key={s.id}><div><b>{s.name}</b><span>★ {s.rating} · {s.category}</span><small>☎ {s.phone||"電話待補"}　⌖ {s.address||"地址待補"}</small>{duplicate&&<em>此店家已在資料庫中</em>}</div><button className="primary" disabled={duplicate} onClick={()=>saveSearchedStore(s)}>{duplicate?"已加入":"加入"}</button></div>})}
         </section>
         <section className="store-admin-grid">
           {stores.map(store=><article className="admin-card" key={store.id}>

@@ -362,6 +362,10 @@ input:focus, select:focus { border-color: #ff5d43; box-shadow: 0 0 0 3px #ef3e2b
 .search-result { display: flex; justify-content: space-between; align-items: center; }
 .search-result .primary { width: auto; margin: 0; }
 .search-result span, .search-result small, .admin-card p, .admin-card small, .history-head span { color: #b98165; }
+.search-result>div { display: flex; flex-direction: column; gap: 4px; }
+.search-result em { color: #ff8e82; font-size: 12px; font-style: normal; font-weight: 900; }
+.search-result.duplicate { border-color: #8f352c; background: #2a0d0a; }
+.search-result .primary:disabled { color: #9f7463; border-color: #57312a; background: #39201b; cursor: not-allowed; opacity: .8; }
 .store-admin-grid { display: grid; grid-template-columns: repeat(3, 1fr); align-items: start; gap: 14px; margin-top: 20px; }
 .admin-card { display: flex; min-height: 360px; flex-direction: column; gap: 14px; }
 .admin-card h3 { margin-top: 8px; color: #ffe0a6; }
