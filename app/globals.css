@@ -379,10 +379,14 @@ input:focus, select:focus { border-color: #ff5d43; box-shadow: 0 0 0 3px #ef3e2b
 }
 .primary:disabled { opacity: .4; cursor: not-allowed; }
 .secondary { color: #ffc680; background: transparent; }
-.order-row { display: grid; grid-template-columns: 1fr auto 30px; gap: 10px; padding: 13px 0; border-bottom: 1px solid #4f1d17; }
+.order-row { display: grid; grid-template-columns: minmax(0,1fr) auto auto; align-items: center; gap: 10px; padding: 13px 0; border-bottom: 1px solid #4f1d17; }
 .order-row div { display: flex; flex-direction: column; gap: 4px; }
 .order-row span { color: #b78469; font-size: 13px; }
 .order-row button { width: 28px; height: 28px; color: white; border: 0; border-radius: 50%; background: #6d1b15; }
+.order-row .order-actions { flex-direction: row; gap: 5px; }
+.order-row .order-actions button { width: auto; height: auto; padding: 6px 8px; border: 1px solid #753027; border-radius: 7px; color: #ffd29c; background: #35110d; font-size: 11px; font-weight: 900; }
+.order-row .order-actions .danger { color: #ff8d83; }
+.order-owner-note { color: #845d4e; font-size: 10px; white-space: nowrap; }
 .order-inline-stats { display: grid; grid-template-columns: repeat(4,1fr); gap: 8px; margin-top: 16px; }
 .order-inline-stats>div { display: flex; align-items: center; gap: 8px; min-width: 0; padding: 10px; border: 1px solid #5f251e; border-radius: 11px; background: #210b08; }
 .order-inline-stats>div>span { font-size: 18px; }
@@ -496,6 +500,24 @@ input:focus, select:focus { border-color: #ff5d43; box-shadow: 0 0 0 3px #ef3e2b
   background: linear-gradient(160deg, #2b0d09, #120504);
   box-shadow: 0 24px 90px #000, 0 0 30px #e43d2638;
 }
+.order-edit-modal {
+  position: relative;
+  width: min(680px, 100%);
+  max-height: calc(100vh - 30px);
+  overflow-y: auto;
+  padding: 26px;
+  border: 1px solid #a23c2c;
+  border-radius: 20px;
+  background: linear-gradient(160deg, #2b0d09, #120504);
+  box-shadow: 0 24px 90px #000, 0 0 30px #e43d2638;
+}
+.order-edit-modal h2 { margin: 12px 0 4px; color: #ffe2a4; font-size: 27px; }
+.edit-order-store { color: #ffca56; font-size: 17px; font-weight: 900; }
+.edit-order-grid { display: grid; grid-template-columns: 1fr 1.5fr .55fr; gap: 11px; margin-top: 12px; }
+.edit-order-grid .wide { grid-column: 1/-1; }
+.edit-order-total { display: flex; justify-content: space-between; align-items: center; margin-top: 16px; padding: 13px 15px; border: 1px solid #62271f; border-radius: 11px; background: #160706; }
+.edit-order-total span { color: #bc8669; }
+.edit-order-total strong { color: #ffd44e; font-size: 22px; }
 .bulk-menu-modal h2 { margin: 13px 0 5px; color: #ffe2a4; font-size: 28px; }
 .bulk-store-name { color: #ffcd55; font-size: 18px; font-weight: 900; }
 .bulk-help { margin-top: 15px; color: #d2a080; line-height: 1.7; }
@@ -605,6 +627,9 @@ input:focus, select:focus { border-color: #ff5d43; box-shadow: 0 0 0 3px #ef3e2b
   .form-grid label { margin-top: 8px; }
   .primary, .secondary { margin-top: 10px; padding: 11px 13px; }
   .order-row { padding: 10px 0; }
+  .order-row { grid-template-columns: minmax(0,1fr) auto; }
+  .order-row .order-actions, .order-owner-note { grid-column: 1/-1; justify-self: stretch; }
+  .order-row .order-actions button { flex: 1; padding: 8px; }
   .order-inline-stats { grid-template-columns: 1fr 1fr; gap: 6px; margin-top: 12px; }
   .order-inline-stats>div { padding: 8px; }
   .total { padding: 13px 0; }
@@ -618,6 +643,11 @@ input:focus, select:focus { border-color: #ff5d43; box-shadow: 0 0 0 3px #ef3e2b
   .history-row.editable { grid-template-columns: 1fr 1fr; }
   .history-row.editable>span:nth-child(3) { grid-column: 1/-1; }
   .modal-backdrop { padding: 0; }
+  .order-edit-modal { position: absolute; right: 0; bottom: 0; left: 0; width: 100%; max-height: 92vh; padding: 20px 15px 22px; border-width: 1px 0 0; border-radius: 20px 20px 0 0; }
+  .order-edit-modal h2 { font-size: 23px; }
+  .edit-order-grid { grid-template-columns: 1fr; gap: 3px; }
+  .edit-order-grid .wide { grid-column: auto; }
+  .edit-order-grid label { margin-top: 9px; }
   .bulk-menu-modal { width: 100%; height: 100%; max-height: none; padding: 22px 17px 92px; border: 0; border-radius: 0; }
   .bulk-menu-modal h2 { padding-right: 35px; font-size: 24px; }
   .bulk-menu-modal textarea { min-height: 330px; font-size: 16px; }

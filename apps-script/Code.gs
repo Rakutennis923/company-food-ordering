@@ -16,7 +16,7 @@ function doGet() {
 function doPost(e) {
   try {
     const body = JSON.parse(e?.postData?.contents || "{}");
-    const publicActions = ["getSharedState","saveSharedDaily","addSharedOrder","closeSharedOrders"];
+    const publicActions = ["getSharedState","saveSharedDaily","addSharedOrder","closeSharedOrders","updateOrder","deleteOrder"];
     if (!publicActions.includes(body.action)) verify(body.token);
     switch (body.action) {
       case "listStores": return output({ok:true,stores:listStores(body)});

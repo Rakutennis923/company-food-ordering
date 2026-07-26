@@ -124,7 +124,7 @@ export default function OrderingApp() {
   const [ratingFilter, setRatingFilter] = useState(3);
   const [duty, setDuty] = useState("");
   const [deadline, setDeadline] = useState("11:20");
-  const [staff, setStaff] = useState(initialStaffNames[0]);
+  const [staff, setStaff] = useLocalState("food-current-staff-v3", initialStaffNames[0]);
   const [itemId, setItemId] = useState("");
   const [qty, setQty] = useState(1);
   const [note, setNote] = useState("");
@@ -141,6 +141,12 @@ export default function OrderingApp() {
   const [bulkMenuText, setBulkMenuText] = useState("");
   const [bulkMenuErrors, setBulkMenuErrors] = useState<string[]>([]);
   const [bulkMenuSaving, setBulkMenuSaving] = useState(false);
+  const [editingOrderId, setEditingOrderId] = useState("");
+  const [editOrderStaff, setEditOrderStaff] = useState("");
+  const [editOrderMenuId, setEditOrderMenuId] = useState("");
+  const [editOrderQty, setEditOrderQty] = useState(1);
+  const [editOrderNote, setEditOrderNote] = useState("");
+  const [editOrderSaving, setEditOrderSaving] = useState(false);
   const selectedIdsRef = useRef<string[]>(seedStores.map(store => store.id));
   const selectionSaveTimerRef = useRef<number | null>(null);
   const selectionLockUntilRef = useRef(0);
@@ -161,6 +167,9 @@ export default function OrderingApp() {
   const currentTotal = orders.reduce((sum, order) => sum + order.price * order.qty, 0);
   const dinerCount = new Set(orders.map(order => order.staff)).size;
   const selectedStores = stores.filter(store => validSelectedIds.includes(store.id));
+  const editingOrder = orders.find(order => order.id === editingOrderId);
+  const editingOrderStore = stores.find(store => store.id === editingOrder?.storeId);
+  const editingOrderMenuItem = editingOrderStore?.menu.find(item => item.id === editOrderMenuId);
   const storeEmoji = (store: Store) =>
     store.category.includes("麵") ? "🍜" :
     store.category.includes("越") ? "🍲" :
@@ -455,6 +464,72 @@ export default function OrderingApp() {
       } catch(error) { return flash(String((error as Error).message)); }
     } else setOrders([...orders, order]);
     setQty(1); setNote(""); flash("已加入共同訂單");
+  }
+
+  function openOrderEditor(order: Order) {
+    const store = stores.find(item => item.id === order.storeId);
+    const menuItem = store?.menu.find(item => item.name === order.item);
+    setEditingOrderId(order.id);
+    setEditOrderStaff(order.staff);
+    setEditOrderMenuId(menuItem?.id || store?.menu[0]?.id || "");
+    setEditOrderQty(order.qty);
+    setEditOrderNote(order.note);
+  }
+
+  function closeOrderEditor() {
+    if (editOrderSaving) return;
+    setEditingOrderId("");
+  }
+
+  async function saveCurrentOrderEdit() {
+    if (!editingOrder || !editingOrderMenuItem || !editOrderStaff.trim()) return flash("請完整選擇姓名與餐點");
+    const updated: Order = {
+      ...editingOrder,
+      staff:editOrderStaff.trim(),
+      item:editingOrderMenuItem.name,
+      price:editingOrderMenuItem.price,
+      qty:Math.max(1,editOrderQty),
+      note:editOrderNote.trim(),
+    };
+    try {
+      setEditOrderSaving(true);
+      if (apiUrl) {
+        await sharedApi("updateOrder",{data:{
+          "訂單ID":updated.id,
+          "同事姓名":updated.staff,
+          "餐點名稱":updated.item,
+          "單價":updated.price,
+          "數量":updated.qty,
+          "備註":updated.note,
+          "訂單狀態":"有效",
+        }});
+        await syncSharedState(true);
+      } else {
+        setOrders(current => current.map(order => order.id === updated.id ? updated : order));
+      }
+      setEditingOrderId("");
+      flash("訂單已修改並重新計算金額");
+    } catch (error) {
+      flash(String((error as Error).message));
+    } finally {
+      setEditOrderSaving(false);
+    }
+  }
+
+  async function deleteCurrentOrder(order: Order) {
+    if (!confirm(`確定刪除「${order.staff}－${order.item}」？`)) return;
+    try {
+      if (apiUrl) {
+        await sharedApi("deleteOrder",{orderId:order.id});
+        await syncSharedState(true);
+      } else {
+        setOrders(current => current.filter(item => item.id !== order.id));
+      }
+      if (editingOrderId === order.id) setEditingOrderId("");
+      flash("訂單已刪除並重新計算金額");
+    } catch (error) {
+      flash(String((error as Error).message));
+    }
   }
 
   async function closeOrder() {
@@ -882,7 +957,14 @@ export default function OrderingApp() {
           </div>
           <div className="panel order-summary">
             <div className="section-title"><div><span>ORDER</span><h2>今日共同訂單</h2></div><b>{orders.length} 筆</b></div>
-            {!orders.length ? <div className="empty">還沒有餐點，第一位開吃吧！</div> : orders.map(o=><div className="order-row" key={o.id}><div><b>{o.staff}</b><span>{o.item} × {o.qty}{o.note&&` · ${o.note}`}</span></div><strong>{money(o.price*o.qty)}</strong><button onClick={()=>setOrders(orders.filter(x=>x.id!==o.id))}>×</button></div>)}
+            {!orders.length ? <div className="empty">還沒有餐點，第一位開吃吧！</div> : orders.map(o=>{
+              const canEdit = o.staff === staff || (!!duty.trim() && duty.trim() === staff.trim());
+              return <div className="order-row" key={o.id}>
+                <div><b>{o.staff}</b><span>{o.item} × {o.qty}{o.note&&` · ${o.note}`}</span></div>
+                <strong>{money(o.price*o.qty)}</strong>
+                {canEdit ? <div className="order-actions"><button onClick={()=>openOrderEditor(o)}>修改</button><button className="danger" onClick={()=>deleteCurrentOrder(o)}>刪除</button></div> : <small className="order-owner-note">本人可修改</small>}
+              </div>;
+            })}
             <div className="order-inline-stats">
               <div><span>👥</span><p>已點餐<b>{dinerCount} 人</b></p></div>
               <div><span>🍽️</span><p>候選店家<b>{validSelectedIds.length} 間</b></p></div>
@@ -947,6 +1029,40 @@ export default function OrderingApp() {
           <p className="price-warning">金鑰只會儲存在管理者目前的瀏覽器。提供給同事的共享連結只包含 Apps Script 網址，不包含 API_TOKEN。</p>
           <button className="primary" disabled={syncing} onClick={syncStores}>{syncing?"同步中…":"驗證連線並同步店家"}</button>
           <button className="secondary" onClick={copySharedLink}>🔗 複製全員共享點餐連結</button>
+        </section>
+      </div>}
+
+      {editingOrder && editingOrderStore && <div className="modal-backdrop" role="presentation" onMouseDown={event=>event.target===event.currentTarget&&closeOrderEditor()}>
+        <section className="order-edit-modal" role="dialog" aria-modal="true" aria-labelledby="order-edit-title">
+          <button className="modal-close" onClick={closeOrderEditor} aria-label="關閉">×</button>
+          <span className="tag">EDIT ORDER</span>
+          <h2 id="order-edit-title">修改訂單</h2>
+          <p className="edit-order-store">{editingOrderStore.name}</p>
+          <div className="edit-order-grid">
+            <label>訂餐姓名
+              <select value={editOrderStaff} onChange={event=>setEditOrderStaff(event.target.value)}>
+                {people.map(name=><option key={name}>{name}</option>)}
+              </select>
+            </label>
+            <label>餐點
+              <select value={editOrderMenuId} onChange={event=>setEditOrderMenuId(event.target.value)}>
+                {menuGroups(editingOrderStore.menu).map(group=><optgroup key={group.category} label={group.category}>
+                  {group.items.map(item=><option key={item.id} value={item.id}>{item.name} · {money(item.price)}</option>)}
+                </optgroup>)}
+              </select>
+            </label>
+            <label>數量
+              <input type="number" min="1" max="99" value={editOrderQty} onChange={event=>setEditOrderQty(Math.max(1,Number(event.target.value)||1))}/>
+            </label>
+            <label className="wide">備註
+              <input value={editOrderNote} onChange={event=>setEditOrderNote(event.target.value)} placeholder="例如：飯少、不要辣、醬另外放"/>
+            </label>
+          </div>
+          <div className="edit-order-total"><span>修改後小計</span><strong>{money((editingOrderMenuItem?.price||0)*Math.max(1,editOrderQty))}</strong></div>
+          <div className="modal-actions">
+            <button className="secondary" onClick={closeOrderEditor} disabled={editOrderSaving}>取消</button>
+            <button className="primary" onClick={saveCurrentOrderEdit} disabled={editOrderSaving||!editingOrderMenuItem}>{editOrderSaving?"正在儲存…":"儲存修改"}</button>
+          </div>
         </section>
       </div>}
 
