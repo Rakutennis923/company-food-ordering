@@ -57,6 +57,14 @@ const todayText = () => {
   const now = new Date();
   return `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,"0")}-${String(now.getDate()).padStart(2,"0")}`;
 };
+const menuGroups = (menu: MenuItem[]) => {
+  const groups = new Map<string,MenuItem[]>();
+  menu.forEach(item => {
+    const category = item.category?.trim() || "其他";
+    groups.set(category, [...(groups.get(category) || []), item]);
+  });
+  return [...groups.entries()].map(([category,items]) => ({category,items}));
+};
 
 function useLocalState<T>(key: string, initial: T) {
   const [value, setValue] = useState<T>(initial);
@@ -101,6 +109,10 @@ export default function OrderingApp() {
   const [sharedStatus, setSharedStatus] = useState<"local"|"syncing"|"online"|"error">("local");
   const [isClosed, setIsClosed] = useState(false);
   const [lastSharedSync, setLastSharedSync] = useState("");
+  const [bulkMenuStoreId, setBulkMenuStoreId] = useState("");
+  const [bulkMenuText, setBulkMenuText] = useState("");
+  const [bulkMenuErrors, setBulkMenuErrors] = useState<string[]>([]);
+  const [bulkMenuSaving, setBulkMenuSaving] = useState(false);
 
   const visibleStores = useMemo(() => stores.filter(s =>
     s.active !== false &&
@@ -223,6 +235,7 @@ export default function OrderingApp() {
                 id: String(menuRow["菜單ID"] || ""),
                 name: String(menuRow["餐點名稱"] || ""),
                 price: Number(menuRow["價格"] || 0),
+                category: String(menuRow["餐點分類"] || "其他"),
               })),
             active: true,
           } satisfies Store;
@@ -565,11 +578,103 @@ export default function OrderingApp() {
     setStores(stores.filter(s => s.id !== id)); setSelectedIds(selectedIds.filter(x => x !== id));
   }
 
-  function addMenuItem(storeId: string) {
-    const name = prompt("餐點名稱");
-    if (!name) return;
-    const price = Number(prompt("價格") || 0);
-    setStores(stores.map(s => s.id === storeId ? {...s, menu:[...s.menu,{id:`M${Date.now()}`,name,price}]} : s));
+  function openBulkMenu(storeId: string) {
+    setBulkMenuStoreId(storeId);
+    setBulkMenuText("");
+    setBulkMenuErrors([]);
+  }
+
+  function closeBulkMenu() {
+    if (bulkMenuSaving) return;
+    setBulkMenuStoreId("");
+    setBulkMenuText("");
+    setBulkMenuErrors([]);
+  }
+
+  async function saveBulkMenu() {
+    const store = stores.find(item => item.id === bulkMenuStoreId);
+    if (!store) return;
+
+    const parsed: {name:string; price:number; category:string; line:number}[] = [];
+    const errors: string[] = [];
+    let currentCategory = "其他";
+    bulkMenuText.split(/\r?\n/).forEach((rawLine, index) => {
+      const line = rawLine.trim();
+      if (!line) return;
+      const match = line.match(/^(.+?)[,，]\s*(\d+(?:\.\d+)?)\s*$/)
+        || line.match(/^(.+?)\s+(\d+(?:\.\d+)?)\s*$/);
+      if (match && match[1].trim() && Number(match[2]) > 0) {
+        parsed.push({name:match[1].trim(), price:Number(match[2]), category:currentCategory, line:index + 1});
+        return;
+      }
+      if (!/[0-9]/.test(line) && !/[,，]/.test(line)) {
+        currentCategory = line.replace(/[：:]$/, "").trim() || "其他";
+        return;
+      }
+      {
+        errors.push(`第 ${index + 1} 行：${line}`);
+      }
+    });
+
+    if (errors.length) {
+      setBulkMenuErrors(errors);
+      return;
+    }
+    if (!parsed.length) {
+      setBulkMenuErrors(["請至少輸入一項餐點。"]);
+      return;
+    }
+
+    const unique = new Map<string,{name:string;price:number;category:string;line:number}>();
+    parsed.forEach(item => unique.set(`${item.category}\u0000${item.name}`, item));
+    const rows = [...unique.values()];
+    const now = Date.now();
+    const menuItems: MenuItem[] = rows.map((item, index) => {
+      const existing = store.menu.find(menu => menu.name.trim() === item.name);
+      return {
+        id: existing?.id || `M${now}-${index + 1}`,
+        name: item.name,
+        price: item.price,
+        category: item.category,
+      };
+    });
+
+    try {
+      setBulkMenuSaving(true);
+      if (apiUrl && apiToken) {
+        for (const item of menuItems) {
+          const existing = store.menu.find(menu => menu.name.trim() === item.name);
+          await api("saveMenu", {data:{
+            "菜單ID": existing?.id || "",
+            "店家ID": store.id,
+            "店名": store.name,
+            "餐點分類": item.category || "其他",
+            "餐點名稱": item.name,
+            "價格": item.price,
+            "供應狀態": "供應中",
+          }});
+        }
+      }
+
+      setStores(current => current.map(item => {
+        if (item.id !== store.id) return item;
+        const nextMenu = [...item.menu];
+        menuItems.forEach(menuItem => {
+          const index = nextMenu.findIndex(menu => menu.name.trim() === menuItem.name);
+          if (index >= 0) nextMenu[index] = {...nextMenu[index], price:menuItem.price, category:menuItem.category};
+          else nextMenu.push(menuItem);
+        });
+        return {...item, menu:nextMenu};
+      }));
+      if (apiUrl && apiToken) await syncSharedState(true);
+      flash(`已一次新增／更新 ${menuItems.length} 項菜單`);
+      setBulkMenuSaving(false);
+      closeBulkMenu();
+    } catch (error) {
+      setBulkMenuErrors([String((error as Error).message)]);
+    } finally {
+      setBulkMenuSaving(false);
+    }
   }
 
   return (
@@ -670,7 +775,11 @@ export default function OrderingApp() {
             <p className="price-warning">菜單及價格僅供參考，實際售價與供應狀況請以店家當日公告為準。</p>
             <div className="form-grid">
               <label>同事姓名<select value={staff} onChange={e=>setStaff(e.target.value)}>{people.map(n=><option key={n}>{n}</option>)}</select></label>
-              <label>餐點<select value={itemId} onChange={e=>setItemId(e.target.value)}>{activeStore.menu.map(m=><option key={m.id} value={m.id}>{m.name} · NT$ {m.price}</option>)}</select></label>
+              <label>餐點<select value={itemId} onChange={e=>setItemId(e.target.value)}>
+                {menuGroups(activeStore.menu).map(group=><optgroup key={group.category} label={group.category}>
+                  {group.items.map(m=><option key={m.id} value={m.id}>{m.name} · NT$ {m.price}</option>)}
+                </optgroup>)}
+              </select></label>
               <label>數量<input type="number" min="1" value={qty} onChange={e=>setQty(Number(e.target.value))}/></label>
               <label className="wide">備註<input value={note} onChange={e=>setNote(e.target.value)} placeholder="例如：飯少、不要辣、醬另外放"/></label>
             </div>
@@ -701,8 +810,14 @@ export default function OrderingApp() {
         <section className="store-admin-grid">
           {stores.map(store=><article className="admin-card" key={store.id}>
             <div><span className="tag">{store.category}</span><h3>{store.name}</h3><p>★ {store.rating.toFixed(1)} · {store.meals.join("／")}</p><small>☎ {store.phone||"電話待補"}<br/>⌖ {store.address||"地址待補"}</small></div>
-            <div className="menu-preview">{store.menu.map(m=><span key={m.id}><button className="menu-name" onClick={()=>editMenuItem(store.id,m)}>{m.name}</button><b>{money(m.price)}</b><button className="menu-delete" onClick={()=>deleteMenuItem(store.id,m.id)}>×</button></span>)}{!store.menu.length&&<em>尚無菜單</em>}</div>
-            <div className="card-actions"><button onClick={()=>addMenuItem(store.id)}>＋新增菜單</button><button onClick={()=>editStore(store)}>修改店家</button><button className="danger" onClick={()=>deleteStore(store.id)}>刪除</button></div>
+            <div className="menu-preview">
+              {menuGroups(store.menu).map(group=><div className="menu-category" key={group.category}>
+                <h4>{group.category}</h4>
+                {group.items.map(m=><span key={m.id}><button className="menu-name" onClick={()=>editMenuItem(store.id,m)}>{m.name}</button><b>{money(m.price)}</b><button className="menu-delete" onClick={()=>deleteMenuItem(store.id,m.id)}>×</button></span>)}
+              </div>)}
+              {!store.menu.length&&<em>尚無菜單</em>}
+            </div>
+            <div className="card-actions"><button onClick={()=>openBulkMenu(store.id)}>＋批次新增菜單</button><button onClick={()=>editStore(store)}>修改店家</button><button className="danger" onClick={()=>deleteStore(store.id)}>刪除</button></div>
           </article>)}
         </section>
         </>}
@@ -732,6 +847,29 @@ export default function OrderingApp() {
           <p className="price-warning">金鑰只會儲存在管理者目前的瀏覽器。提供給同事的共享連結只包含 Apps Script 網址，不包含 API_TOKEN。</p>
           <button className="primary" disabled={syncing} onClick={syncStores}>{syncing?"同步中…":"驗證連線並同步店家"}</button>
           <button className="secondary" onClick={copySharedLink}>🔗 複製全員共享點餐連結</button>
+        </section>
+      </div>}
+
+      {bulkMenuStoreId && <div className="modal-backdrop" role="presentation" onMouseDown={event=>event.target===event.currentTarget&&closeBulkMenu()}>
+        <section className="bulk-menu-modal" role="dialog" aria-modal="true" aria-labelledby="bulk-menu-title">
+          <button className="modal-close" onClick={closeBulkMenu} aria-label="關閉">×</button>
+          <span className="tag">BULK MENU</span>
+          <h2 id="bulk-menu-title">一次輸入全部菜單</h2>
+          <p className="bulk-store-name">{stores.find(store=>store.id===bulkMenuStoreId)?.name}</p>
+          <p className="bulk-help">先輸入分類標題，再逐行輸入「餐點名稱,價格」。同名餐點會更新價格，不會重複新增。</p>
+          <textarea
+            autoFocus
+            value={bulkMenuText}
+            onChange={event=>{setBulkMenuText(event.target.value);setBulkMenuErrors([]);}}
+            placeholder={"麵類\n牛肉麵 小,160\n牛肉麵 大,180\n\n小菜類\n水餃,70"}
+            rows={12}
+          />
+          <div className="format-example"><b>可接受格式</b><span>燒類（分類標題）</span><span>燒肉飯,115</span><span>燒雞排飯，120</span><span>白飯 15</span></div>
+          {!!bulkMenuErrors.length && <div className="bulk-errors"><b>以下內容格式不正確：</b>{bulkMenuErrors.map(error=><span key={error}>{error}</span>)}</div>}
+          <div className="modal-actions">
+            <button className="secondary" onClick={closeBulkMenu} disabled={bulkMenuSaving}>取消</button>
+            <button className="primary" onClick={saveBulkMenu} disabled={bulkMenuSaving}>{bulkMenuSaving?"正在儲存…":"一次儲存全部菜單"}</button>
+          </div>
         </section>
       </div>}
     </main>
