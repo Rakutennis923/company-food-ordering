@@ -148,11 +148,15 @@ export default function OrderingApp() {
     s.rating >= ratingFilter &&
     (mealFilter === "全部餐期" || s.meals.includes(mealFilter))
   ), [stores, mealFilter, ratingFilter]);
+  const validSelectedIds = useMemo(() => {
+    const availableIds = new Set(stores.filter(store => store.active !== false).map(store => store.id));
+    return [...new Set(selectedIds)].filter(id => availableIds.has(id)).slice(0, 8);
+  }, [selectedIds, stores]);
   const winner = stores.find(s => s.id === winnerId);
-  const activeStore = winner || (selectedIds.length === 1 ? stores.find(s => s.id === selectedIds[0]) : undefined);
+  const activeStore = winner;
   const selectedItem = activeStore?.menu.find(m => m.id === itemId);
   const currentTotal = orders.reduce((sum, order) => sum + order.price * order.qty, 0);
-  const selectedStores = stores.filter(store => selectedIds.includes(store.id)).slice(0, 8);
+  const selectedStores = stores.filter(store => validSelectedIds.includes(store.id));
   const storeEmoji = (store: Store) =>
     store.category.includes("麵") ? "🍜" :
     store.category.includes("越") ? "🍲" :
@@ -160,9 +164,8 @@ export default function OrderingApp() {
     store.category.includes("咖哩") ? "🍛" : "🍽️";
 
   useEffect(() => {
-    if (selectedIds.length === 1) setWinnerId(selectedIds[0]);
-    if (selectedIds.length !== 1 && winnerId && !selectedIds.includes(winnerId)) setWinnerId("");
-  }, [selectedIds, winnerId]);
+    if (winnerId && !validSelectedIds.includes(winnerId)) setWinnerId("");
+  }, [validSelectedIds, winnerId]);
   useEffect(() => setItemId(activeStore?.menu[0]?.id || ""), [activeStore?.id]);
   useEffect(() => {
     const last = history[0];
@@ -346,30 +349,43 @@ export default function OrderingApp() {
   function toggleStore(id: string) {
     if (isClosed) return flash("今日訂單已結單，請到訂餐紀錄追加");
     setWinnerId("");
-    setSelectedIds(current => {
+    setSelectedIds(() => {
+      const current = validSelectedIds;
       const next = current.includes(id) ? current.filter(x => x !== id) : current.length < 8 ? [...current,id] : current;
-      const directStore = next.length === 1 ? stores.find(store=>store.id===next[0]) : undefined;
-      saveSharedSelection(next,directStore?{
-        winnerId:directStore.id,winnerName:directStore.name,status:"開放點餐"
-      }:{}).catch(error=>flash(String((error as Error).message)));
+      if (!current.includes(id) && current.length >= 8) {
+        flash("候選店家最多選擇 8 間");
+        return current;
+      }
+      saveSharedSelection(next).catch(error=>flash(String((error as Error).message)));
       return next;
     });
   }
 
   function spin() {
-    if (selectedIds.length < 2 || spinning) return;
+    if (validSelectedIds.length < 1 || spinning) return;
+    if (validSelectedIds.length === 1) {
+      const id = validSelectedIds[0];
+      const selected = stores.find(store => store.id === id);
+      setHighlightId(id);
+      setWinnerId(id);
+      saveSharedSelection(validSelectedIds,{winnerId:id,winnerName:selected?.name||"",status:"開放點餐"})
+        .then(()=>syncSharedState(true))
+        .catch(error=>flash(String((error as Error).message)));
+      flash(`已選定：${selected?.name}，現在可以開始點餐`);
+      return;
+    }
     setSpinning(true); setWinnerId("");
     const duration = 5000 + Math.floor(Math.random() * 2000);
     const started = Date.now();
     let index = 0;
     const timer = window.setInterval(() => {
-      setHighlightId(selectedIds[index++ % selectedIds.length]);
+      setHighlightId(validSelectedIds[index++ % validSelectedIds.length]);
       if (Date.now() - started >= duration) {
         window.clearInterval(timer);
-        const id = selectedIds[Math.floor(Math.random() * selectedIds.length)];
+        const id = validSelectedIds[Math.floor(Math.random() * validSelectedIds.length)];
         setHighlightId(id); setWinnerId(id); setSpinning(false);
         const selected = stores.find(s => s.id === id);
-        saveSharedSelection(selectedIds,{winnerId:id,winnerName:selected?.name||"",status:"開放點餐"})
+        saveSharedSelection(validSelectedIds,{winnerId:id,winnerName:selected?.name||"",status:"開放點餐"})
           .then(()=>syncSharedState(true))
           .catch(error=>flash(String((error as Error).message)));
         flash(`今天吃：${stores.find(s => s.id === id)?.name}`);
@@ -732,7 +748,7 @@ export default function OrderingApp() {
         <section className="neon-hero">
           <div className="hero-heading">
             <h2>☆ 今日午餐選店 ☆</h2>
-            <p>值班人員在下方選擇 2～8 家即可抽選；只選 1 家就直接開放點餐。</p>
+            <p>值班人員先選擇 1～8 間店家，再按中央按鈕；選 1 間直接開始點餐，選 2～8 間進行抽選。</p>
           </div>
           <div className="marquee-wrap">
             <aside className="side-sign left">好<br/>吃<br/>才<br/>是<br/>王</aside>
@@ -752,15 +768,15 @@ export default function OrderingApp() {
           </div>
           <div className="draw-stage">
             <span>≫≫≫</span>
-            <button className="spin" disabled={selectedIds.length<2||spinning||isClosed} onClick={spin}>{isClosed?"今日已結單":spinning?"抽選中…":"啟動抽選"}</button>
+            <button className="spin" disabled={validSelectedIds.length<1||spinning||isClosed} onClick={spin}>{isClosed?"今日已結單":spinning?"抽選中…":validSelectedIds.length===1?"開始點餐":"啟動抽選"}</button>
             <span>≪≪≪</span>
-            <small>5–7 秒隨機抽選</small>
+            <small>{validSelectedIds.length===1?"按下後直接選定店家":"2 間以上進行 5–7 秒隨機抽選"}</small>
           </div>
         </section>
 
         <section className="stats-row">
           <div><span>👥</span><p>已點餐<strong>{orders.length} 人</strong></p></div>
-          <div><span>🧑‍🤝‍🧑</span><p>候選店家<strong>{selectedIds.length} 家</strong></p></div>
+          <div><span>🧑‍🤝‍🧑</span><p>候選店家<strong>{validSelectedIds.length} 家</strong></p></div>
           <div><span>👛</span><p>目前總額<strong>{money(currentTotal)}</strong></p></div>
           <div><span>◷</span><p>今日截止<strong>{deadline}</strong></p></div>
         </section>
