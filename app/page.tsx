@@ -156,6 +156,7 @@ export default function OrderingApp() {
   const activeStore = winner;
   const selectedItem = activeStore?.menu.find(m => m.id === itemId);
   const currentTotal = orders.reduce((sum, order) => sum + order.price * order.qty, 0);
+  const dinerCount = new Set(orders.map(order => order.staff)).size;
   const selectedStores = stores.filter(store => validSelectedIds.includes(store.id));
   const storeEmoji = (store: Store) =>
     store.category.includes("麵") ? "🍜" :
@@ -323,6 +324,14 @@ export default function OrderingApp() {
       winnerId:"",winnerName:"",status:"選店中",...extra,
     }});
     setIsClosed(false);
+  }
+
+  function updateDeadline(nextHour: string, nextMinute: string) {
+    const next = `${nextHour.padStart(2,"0")}:${nextMinute.padStart(2,"0")}`;
+    setDeadline(next);
+    saveSharedSelection(validSelectedIds,{
+      deadline:next,duty,winnerId,winnerName:winner?.name||"",status:winnerId?"開放點餐":"選店中"
+    }).catch(error=>flash(String((error as Error).message)));
   }
 
   async function syncStores() {
@@ -754,7 +763,7 @@ export default function OrderingApp() {
             <aside className="side-sign left">好<br/>吃<br/>才<br/>是<br/>王</aside>
             <div className="marquee">
               {selectedStores.map(store=><article key={store.id} className={`stage-store ${highlightId===store.id?"lit":""} ${winnerId===store.id?"winner":""}`} onClick={()=>toggleStore(store.id)}>
-                <b className="stage-check">✓</b>
+                <b className={`selection-badge ${winnerId===store.id?"final":""}`}>{winnerId===store.id?"★ 今日選定":"✓ 候選"}</b>
                 <div className="food-icon">{storeEmoji(store)}</div>
                 <div className="stage-copy">
                   <h3>{store.name}</h3>
@@ -766,19 +775,16 @@ export default function OrderingApp() {
             </div>
             <aside className="side-sign right">吃<br/>飽<br/>才<br/>有<br/>戰<br/>鬥<br/>力</aside>
           </div>
+          {winner && <div className="winner-announcement">
+            <span>✓</span>
+            <p>今天決定吃這間<strong>{winner.name}</strong><small>已開放點餐，請同事在下方填寫餐點</small></p>
+          </div>}
           <div className="draw-stage">
             <span>≫≫≫</span>
             <button className="spin" disabled={validSelectedIds.length<1||spinning||isClosed} onClick={spin}>{isClosed?"今日已結單":spinning?"抽選中…":validSelectedIds.length===1?"開始點餐":"啟動抽選"}</button>
             <span>≪≪≪</span>
             <small>{validSelectedIds.length===1?"按下後直接選定店家":"2 間以上進行 5–7 秒隨機抽選"}</small>
           </div>
-        </section>
-
-        <section className="stats-row">
-          <div><span>👥</span><p>已點餐<strong>{orders.length} 人</strong></p></div>
-          <div><span>🧑‍🤝‍🧑</span><p>候選店家<strong>{validSelectedIds.length} 家</strong></p></div>
-          <div><span>👛</span><p>目前總額<strong>{money(currentTotal)}</strong></p></div>
-          <div><span>◷</span><p>今日截止<strong>{deadline}</strong></p></div>
         </section>
 
         <section className="dashboard-grid">
@@ -792,21 +798,30 @@ export default function OrderingApp() {
               <b>目前顯示 {visibleStores.length} 家</b>
             </div>
             <div className="store-strip">
-              {visibleStores.map(store=><button key={store.id} className={`store-pill ${selectedIds.includes(store.id)?"chosen":""} ${highlightId===store.id?"lit":""} ${winnerId===store.id?"winner":""}`} onClick={()=>toggleStore(store.id)}>
-                <i>{selectedIds.includes(store.id)?"✓":"＋"}</i><span>{storeEmoji(store)} {store.name}</span>
+              {visibleStores.map(store=><button key={store.id} className={`store-pill ${validSelectedIds.includes(store.id)?"chosen":""} ${highlightId===store.id?"lit":""} ${winnerId===store.id?"winner":""}`} onClick={()=>toggleStore(store.id)}>
+                <i>{validSelectedIds.includes(store.id)?"✓":"＋"}</i><span>{storeEmoji(store)} {store.name}</span>{winnerId===store.id&&<b>今日選定</b>}
               </button>)}
             </div>
             <div className="draw-row">
-              <p>已選 <strong>{selectedIds.length}</strong> 家，可按上方啟動抽選</p>
-              <div><label>值班人員<input value={duty} onChange={e=>setDuty(e.target.value)} onBlur={()=>saveSharedSelection(selectedIds,{duty,winnerId,winnerName:winner?.name||"",status:winnerId?"開放點餐":"選店中"}).catch(()=>{})} placeholder="選擇姓名"/></label><label>點餐截止<input type="time" value={deadline} onChange={e=>setDeadline(e.target.value)} onBlur={()=>saveSharedSelection(selectedIds,{deadline,winnerId,winnerName:winner?.name||"",status:winnerId?"開放點餐":"選店中"}).catch(()=>{})}/></label></div>
+              <p>已選 <strong>{validSelectedIds.length}</strong> 家，{validSelectedIds.length===1?"可按上方開始點餐":"可按上方啟動抽選"}</p>
+              <div>
+                <label>值班人員<input value={duty} onChange={e=>setDuty(e.target.value)} onBlur={()=>saveSharedSelection(validSelectedIds,{duty,winnerId,winnerName:winner?.name||"",status:winnerId?"開放點餐":"選店中"}).catch(()=>{})} placeholder="輸入姓名"/></label>
+                <label className="cutoff-label">點餐截止
+                  <span className="time24-picker">
+                    <select aria-label="截止小時" value={deadline.split(":")[0]||"11"} onChange={e=>updateDeadline(e.target.value,deadline.split(":")[1]||"00")}>
+                      {Array.from({length:24},(_,hour)=>String(hour).padStart(2,"0")).map(hour=><option key={hour} value={hour}>{hour} 時</option>)}
+                    </select>
+                    <b>:</b>
+                    <select aria-label="截止分鐘" value={deadline.split(":")[1]||"00"} onChange={e=>updateDeadline(deadline.split(":")[0]||"11",e.target.value)}>
+                      {Array.from({length:60},(_,minute)=>String(minute).padStart(2,"0")).map(minute=><option key={minute} value={minute}>{minute} 分</option>)}
+                    </select>
+                  </span>
+                  <small>24 小時制</small>
+                </label>
+              </div>
             </div>
             <p className="sync-note">♧ 已同步 {stores.length} 家店與 {stores.reduce((sum, store)=>sum+store.menu.length,0)} 個餐點</p>
             <p className="price-warning"><b>價格提醒</b>　菜單內容與價格僅供點餐參考，店家可能調整售價；實際餐點、價格及供應狀況，以店家最新公告與當日確認結果為準。</p>
-          </div>
-          <div className="panel order-summary">
-            <div className="section-title"><div><span>02</span><h2>訂單自動統計</h2></div></div>
-            {!orders.length ? <div className="empty bowl"><b>🥣</b><span>還沒有人點餐<br/>第一份美味等你加入</span></div> : orders.map(o=><div className="order-row" key={o.id}><div><b>{o.staff}</b><span>{o.item} × {o.qty}{o.note&&` · ${o.note}`}</span></div><strong>{money(o.price*o.qty)}</strong><button onClick={()=>setOrders(orders.filter(x=>x.id!==o.id))}>×</button></div>)}
-            {!!orders.length && <><div className="total"><span>訂單總計</span><strong>{money(currentTotal)}</strong></div><button className="primary" onClick={closeOrder}>結單並保存紀錄</button></>}
           </div>
         </section>
 
@@ -831,6 +846,12 @@ export default function OrderingApp() {
           <div className="panel order-summary">
             <div className="section-title"><div><span>ORDER</span><h2>今日共同訂單</h2></div><b>{orders.length} 筆</b></div>
             {!orders.length ? <div className="empty">還沒有餐點，第一位開吃吧！</div> : orders.map(o=><div className="order-row" key={o.id}><div><b>{o.staff}</b><span>{o.item} × {o.qty}{o.note&&` · ${o.note}`}</span></div><strong>{money(o.price*o.qty)}</strong><button onClick={()=>setOrders(orders.filter(x=>x.id!==o.id))}>×</button></div>)}
+            <div className="order-inline-stats">
+              <div><span>👥</span><p>已點餐<b>{dinerCount} 人</b></p></div>
+              <div><span>🍽️</span><p>候選店家<b>{validSelectedIds.length} 間</b></p></div>
+              <div><span>💰</span><p>目前金額<b>{money(currentTotal)}</b></p></div>
+              <div><span>◷</span><p>截止時間<b>{deadline}</b></p></div>
+            </div>
             <div className="total"><span>訂單總計</span><strong>{money(currentTotal)}</strong></div>
             <button className="primary" disabled={!orders.length} onClick={closeOrder}>結單並保存紀錄</button>
           </div>
