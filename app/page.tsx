@@ -141,6 +141,9 @@ export default function OrderingApp() {
   const [bulkMenuText, setBulkMenuText] = useState("");
   const [bulkMenuErrors, setBulkMenuErrors] = useState<string[]>([]);
   const [bulkMenuSaving, setBulkMenuSaving] = useState(false);
+  const selectedIdsRef = useRef<string[]>(seedStores.map(store => store.id));
+  const selectionSaveTimerRef = useRef<number | null>(null);
+  const selectionLockUntilRef = useRef(0);
   const bulkMenuParsed = useMemo(() => parseMenuText(bulkMenuText), [bulkMenuText]);
 
   const visibleStores = useMemo(() => stores.filter(s =>
@@ -167,6 +170,12 @@ export default function OrderingApp() {
   useEffect(() => {
     if (winnerId && !validSelectedIds.includes(winnerId)) setWinnerId("");
   }, [validSelectedIds, winnerId]);
+  useEffect(() => {
+    selectedIdsRef.current = validSelectedIds;
+  }, [validSelectedIds]);
+  useEffect(() => () => {
+    if (selectionSaveTimerRef.current !== null) window.clearTimeout(selectionSaveTimerRef.current);
+  }, []);
   useEffect(() => setItemId(activeStore?.menu[0]?.id || ""), [activeStore?.id]);
   useEffect(() => {
     const last = history[0];
@@ -286,8 +295,13 @@ export default function OrderingApp() {
       const daily = state.daily || null;
       if (daily) {
         const ids = String(daily["候選店家ID（以逗號分隔）"] || "").split(",").filter(Boolean);
-        setSelectedIds(ids);
-        setWinnerId(String(daily["最終中選店家ID"] || ""));
+        if (Date.now() >= selectionLockUntilRef.current) {
+          const availableIds = new Set(remoteStoreRows.map(row => String(row["店家ID"] || "")).filter(Boolean));
+          const cleanIds = [...new Set(ids)].filter(id => availableIds.has(id)).slice(0,8);
+          selectedIdsRef.current = cleanIds;
+          setSelectedIds(cleanIds);
+          setWinnerId(String(daily["最終中選店家ID"] || ""));
+        }
         setDuty(String(daily["值班人員"] || ""));
         setDeadline(String(daily["截止時間"] || "11:20").slice(0,5));
         setIsClosed(daily["狀態"] === "已結單");
@@ -326,6 +340,29 @@ export default function OrderingApp() {
     setIsClosed(false);
   }
 
+  function cancelQueuedSelectionSave() {
+    if (selectionSaveTimerRef.current !== null) {
+      window.clearTimeout(selectionSaveTimerRef.current);
+      selectionSaveTimerRef.current = null;
+    }
+  }
+
+  function queueSelectionSave(ids: string[]) {
+    cancelQueuedSelectionSave();
+    selectionLockUntilRef.current = Date.now() + 4000;
+    selectionSaveTimerRef.current = window.setTimeout(async () => {
+      selectionSaveTimerRef.current = null;
+      try {
+        await saveSharedSelection(ids);
+        selectionLockUntilRef.current = Date.now() + 1000;
+        await syncSharedState(true);
+      } catch (error) {
+        selectionLockUntilRef.current = 0;
+        flash(String((error as Error).message));
+      }
+    }, 450);
+  }
+
   function updateDeadline(nextHour: string, nextMinute: string) {
     const next = `${nextHour.padStart(2,"0")}:${nextMinute.padStart(2,"0")}`;
     setDeadline(next);
@@ -357,21 +394,21 @@ export default function OrderingApp() {
 
   function toggleStore(id: string) {
     if (isClosed) return flash("今日訂單已結單，請到訂餐紀錄追加");
+    const availableIds = new Set(stores.filter(store => store.active !== false).map(store => store.id));
+    const current = [...new Set(selectedIdsRef.current)].filter(storeId => availableIds.has(storeId)).slice(0,8);
+    if (!current.includes(id) && current.length >= 8) return flash("候選店家最多選擇 8 間");
+    const next = current.includes(id) ? current.filter(storeId => storeId !== id) : [...current,id];
+    selectedIdsRef.current = next;
+    selectionLockUntilRef.current = Date.now() + 4000;
     setWinnerId("");
-    setSelectedIds(() => {
-      const current = validSelectedIds;
-      const next = current.includes(id) ? current.filter(x => x !== id) : current.length < 8 ? [...current,id] : current;
-      if (!current.includes(id) && current.length >= 8) {
-        flash("候選店家最多選擇 8 間");
-        return current;
-      }
-      saveSharedSelection(next).catch(error=>flash(String((error as Error).message)));
-      return next;
-    });
+    setSelectedIds(next);
+    queueSelectionSave(next);
   }
 
   function spin() {
     if (validSelectedIds.length < 1 || spinning) return;
+    cancelQueuedSelectionSave();
+    selectionLockUntilRef.current = Date.now() + 5000;
     if (validSelectedIds.length === 1) {
       const id = validSelectedIds[0];
       const selected = stores.find(store => store.id === id);
