@@ -402,13 +402,14 @@ export default function OrderingApp() {
   }
 
   function toggleStore(id: string) {
-    if (isClosed) return flash("今日訂單已結單，請到訂餐紀錄追加");
+    if (winnerId && !isClosed) return flash("店家已確定並開放點餐，結單前不能取消或更換");
     const availableIds = new Set(stores.filter(store => store.active !== false).map(store => store.id));
     const current = [...new Set(selectedIdsRef.current)].filter(storeId => availableIds.has(storeId)).slice(0,8);
     if (!current.includes(id) && current.length >= 8) return flash("候選店家最多選擇 8 間");
     const next = current.includes(id) ? current.filter(storeId => storeId !== id) : [...current,id];
     selectedIdsRef.current = next;
     selectionLockUntilRef.current = Date.now() + 4000;
+    if (isClosed) setIsClosed(false);
     setWinnerId("");
     setSelectedIds(next);
     queueSelectionSave(next);
@@ -874,8 +875,8 @@ export default function OrderingApp() {
           <div className="marquee-wrap">
             <aside className="side-sign left">好<br/>吃<br/>才<br/>是<br/>王</aside>
             <div className="marquee">
-              {selectedStores.map(store=><article key={store.id} className={`stage-store ${highlightId===store.id?"lit":""} ${winnerId===store.id?"winner":""}`} onClick={()=>toggleStore(store.id)}>
-                <b className={`selection-badge ${winnerId===store.id?"final":""}`}>{winnerId===store.id?"★ 今日選定":"✓ 候選"}</b>
+              {selectedStores.map(store=><article key={store.id} className={`stage-store ${highlightId===store.id?"lit":""} ${winnerId===store.id?"winner":""} ${winnerId&&!isClosed?"locked":""}`} onClick={()=>toggleStore(store.id)}>
+                <b className={`selection-badge ${winnerId===store.id?"final":""}`}>{winnerId===store.id?"★ 今日選定":winnerId&&!isClosed?"🔒 候選鎖定":"✓ 候選"}</b>
                 <div className="food-icon">{storeEmoji(store)}</div>
                 <div className="stage-copy">
                   <h3>{store.name}</h3>
@@ -893,7 +894,7 @@ export default function OrderingApp() {
           </div>}
           <div className="draw-stage">
             <span>≫≫≫</span>
-            <button className="spin" disabled={validSelectedIds.length<1||spinning||isClosed} onClick={spin}>{isClosed?"今日已結單":spinning?"抽選中…":validSelectedIds.length===1?"開始點餐":"啟動抽選"}</button>
+            <button className="spin" disabled={validSelectedIds.length<1||spinning||isClosed||!!winnerId} onClick={spin}>{isClosed?"今日已結單":winnerId?"店家已鎖定":spinning?"抽選中…":validSelectedIds.length===1?"開始點餐":"啟動抽選"}</button>
             <span>≪≪≪</span>
             <small>{validSelectedIds.length===1?"按下後直接選定店家":"2 間以上進行 5–7 秒隨機抽選"}</small>
           </div>
@@ -910,8 +911,8 @@ export default function OrderingApp() {
               <b>目前顯示 {visibleStores.length} 家</b>
             </div>
             <div className="store-strip">
-              {visibleStores.map(store=><button key={store.id} className={`store-pill ${validSelectedIds.includes(store.id)?"chosen":""} ${highlightId===store.id?"lit":""} ${winnerId===store.id?"winner":""}`} onClick={()=>toggleStore(store.id)}>
-                <i>{validSelectedIds.includes(store.id)?"✓":"＋"}</i><span>{storeEmoji(store)} {store.name}</span>{winnerId===store.id&&<b>今日選定</b>}
+              {visibleStores.map(store=><button key={store.id} className={`store-pill ${validSelectedIds.includes(store.id)?"chosen":""} ${highlightId===store.id?"lit":""} ${winnerId===store.id?"winner":""} ${winnerId&&!isClosed?"locked":""}`} onClick={()=>toggleStore(store.id)} aria-disabled={!!winnerId&&!isClosed} title={winnerId&&!isClosed?"結單前不可變更店家":""}>
+                <i>{winnerId&&!isClosed?"🔒":validSelectedIds.includes(store.id)?"✓":"＋"}</i><span>{storeEmoji(store)} {store.name}</span>{winnerId===store.id&&<b>今日選定</b>}
               </button>)}
             </div>
             <div className="draw-row">

@@ -126,6 +126,8 @@ h1, h2, h3, p { margin: 0; }
   transition: .2s;
 }
 .stage-store:hover, .stage-store.lit { transform: translateY(-5px); box-shadow: 0 0 22px #ffb334, inset 0 0 25px #b62b18; }
+.stage-store.locked { cursor: not-allowed; }
+.stage-store.locked:not(.winner):hover { transform: none; box-shadow: inset 0 0 20px #6e160f; }
 .stage-store.winner {
   z-index: 3;
   border: 4px solid #fff3a4;
@@ -330,6 +332,8 @@ h1, h2, h3, p { margin: 0; }
 .store-pill.winner { color: #381108; border: 3px solid white; background: #ffd54c; box-shadow: 0 0 16px #fff6b0, 0 0 30px #ff572d; transform: translateY(-3px); }
 .store-pill.winner i { color: white; background: #e53020; }
 .store-pill>b { padding: 3px 7px; color: white; border-radius: 999px; background: #e53020; font-size: 10px; }
+.store-pill.locked { cursor: not-allowed; opacity: .72; }
+.store-pill.locked.winner { opacity: 1; }
 .draw-row { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin-top: 2px; padding: 10px 13px; background: #190806; border-radius: 13px; }
 .draw-row>p { color: #d6a47a; }
 .draw-row>p strong { color: #ffd33f; }
