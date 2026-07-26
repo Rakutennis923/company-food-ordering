@@ -57,13 +57,40 @@ const todayText = () => {
   const now = new Date();
   return `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,"0")}-${String(now.getDate()).padStart(2,"0")}`;
 };
-const menuGroups = (menu: MenuItem[]) => {
-  const groups = new Map<string,MenuItem[]>();
+const menuGroups = <T extends {category?: string}>(menu: T[]) => {
+  const groups = new Map<string,T[]>();
   menu.forEach(item => {
     const category = item.category?.trim() || "其他";
     groups.set(category, [...(groups.get(category) || []), item]);
   });
   return [...groups.entries()].map(([category,items]) => ({category,items}));
+};
+const menuTextFromItems = (menu: MenuItem[]) =>
+  menuGroups(menu).map(group =>
+    `${group.category}\n${group.items.map(item => `${item.name},${item.price}`).join("\n")}`
+  ).join("\n\n");
+const parseMenuText = (text: string) => {
+  const items: {name:string; price:number; category:string; line:number}[] = [];
+  const errors: string[] = [];
+  let currentCategory = "其他";
+  text.split(/\r?\n/).forEach((rawLine, index) => {
+    const line = rawLine.trim();
+    if (!line) return;
+    const match = line.match(/^(.+?)[,，]\s*(\d+(?:\.\d+)?)\s*$/)
+      || line.match(/^(.+?)\s+(\d+(?:\.\d+)?)\s*$/);
+    if (match && match[1].trim() && Number(match[2]) > 0) {
+      items.push({name:match[1].trim(), price:Number(match[2]), category:currentCategory, line:index + 1});
+      return;
+    }
+    if (!/[0-9]/.test(line) && !/[,，]/.test(line)) {
+      currentCategory = line.replace(/[：:]$/, "").trim() || "其他";
+      return;
+    }
+    errors.push(`第 ${index + 1} 行：${line}`);
+  });
+  const unique = new Map<string,{name:string;price:number;category:string;line:number}>();
+  items.forEach(item => unique.set(`${item.category}\u0000${item.name}`, item));
+  return {items:[...unique.values()], errors};
 };
 
 function useLocalState<T>(key: string, initial: T) {
@@ -113,6 +140,7 @@ export default function OrderingApp() {
   const [bulkMenuText, setBulkMenuText] = useState("");
   const [bulkMenuErrors, setBulkMenuErrors] = useState<string[]>([]);
   const [bulkMenuSaving, setBulkMenuSaving] = useState(false);
+  const bulkMenuParsed = useMemo(() => parseMenuText(bulkMenuText), [bulkMenuText]);
 
   const visibleStores = useMemo(() => stores.filter(s =>
     s.active !== false &&
@@ -579,8 +607,9 @@ export default function OrderingApp() {
   }
 
   function openBulkMenu(storeId: string) {
+    const store = stores.find(item => item.id === storeId);
     setBulkMenuStoreId(storeId);
-    setBulkMenuText("");
+    setBulkMenuText(store ? menuTextFromItems(store.menu) : "");
     setBulkMenuErrors([]);
   }
 
@@ -595,39 +624,16 @@ export default function OrderingApp() {
     const store = stores.find(item => item.id === bulkMenuStoreId);
     if (!store) return;
 
-    const parsed: {name:string; price:number; category:string; line:number}[] = [];
-    const errors: string[] = [];
-    let currentCategory = "其他";
-    bulkMenuText.split(/\r?\n/).forEach((rawLine, index) => {
-      const line = rawLine.trim();
-      if (!line) return;
-      const match = line.match(/^(.+?)[,，]\s*(\d+(?:\.\d+)?)\s*$/)
-        || line.match(/^(.+?)\s+(\d+(?:\.\d+)?)\s*$/);
-      if (match && match[1].trim() && Number(match[2]) > 0) {
-        parsed.push({name:match[1].trim(), price:Number(match[2]), category:currentCategory, line:index + 1});
-        return;
-      }
-      if (!/[0-9]/.test(line) && !/[,，]/.test(line)) {
-        currentCategory = line.replace(/[：:]$/, "").trim() || "其他";
-        return;
-      }
-      {
-        errors.push(`第 ${index + 1} 行：${line}`);
-      }
-    });
-
-    if (errors.length) {
-      setBulkMenuErrors(errors);
+    if (bulkMenuParsed.errors.length) {
+      setBulkMenuErrors(bulkMenuParsed.errors);
       return;
     }
-    if (!parsed.length) {
+    if (!bulkMenuParsed.items.length) {
       setBulkMenuErrors(["請至少輸入一項餐點。"]);
       return;
     }
 
-    const unique = new Map<string,{name:string;price:number;category:string;line:number}>();
-    parsed.forEach(item => unique.set(`${item.category}\u0000${item.name}`, item));
-    const rows = [...unique.values()];
+    const rows = bulkMenuParsed.items;
     const now = Date.now();
     const menuItems: MenuItem[] = rows.map((item, index) => {
       const existing = store.menu.find(menu => menu.name.trim() === item.name);
@@ -642,6 +648,10 @@ export default function OrderingApp() {
     try {
       setBulkMenuSaving(true);
       if (apiUrl && apiToken) {
+        const nextNames = new Set(menuItems.map(item => item.name.trim()));
+        for (const oldItem of store.menu.filter(item => !nextNames.has(item.name.trim()))) {
+          await api("deleteMenu", {menuId:oldItem.id});
+        }
         for (const item of menuItems) {
           const existing = store.menu.find(menu => menu.name.trim() === item.name);
           await api("saveMenu", {data:{
@@ -658,13 +668,7 @@ export default function OrderingApp() {
 
       setStores(current => current.map(item => {
         if (item.id !== store.id) return item;
-        const nextMenu = [...item.menu];
-        menuItems.forEach(menuItem => {
-          const index = nextMenu.findIndex(menu => menu.name.trim() === menuItem.name);
-          if (index >= 0) nextMenu[index] = {...nextMenu[index], price:menuItem.price, category:menuItem.category};
-          else nextMenu.push(menuItem);
-        });
-        return {...item, menu:nextMenu};
+        return {...item, menu:menuItems};
       }));
       if (apiUrl && apiToken) await syncSharedState(true);
       flash(`已一次新增／更新 ${menuItems.length} 項菜單`);
@@ -810,14 +814,14 @@ export default function OrderingApp() {
         <section className="store-admin-grid">
           {stores.map(store=><article className="admin-card" key={store.id}>
             <div><span className="tag">{store.category}</span><h3>{store.name}</h3><p>★ {store.rating.toFixed(1)} · {store.meals.join("／")}</p><small>☎ {store.phone||"電話待補"}<br/>⌖ {store.address||"地址待補"}</small></div>
-            <div className="menu-preview">
-              {menuGroups(store.menu).map(group=><div className="menu-category" key={group.category}>
-                <h4>{group.category}</h4>
-                {group.items.map(m=><span key={m.id}><button className="menu-name" onClick={()=>editMenuItem(store.id,m)}>{m.name}</button><b>{money(m.price)}</b><button className="menu-delete" onClick={()=>deleteMenuItem(store.id,m.id)}>×</button></span>)}
-              </div>)}
-              {!store.menu.length&&<em>尚無菜單</em>}
+            <div className="menu-summary">
+              <div className="menu-summary-head"><b>菜單</b><span>{store.menu.length ? `共 ${store.menu.length} 項` : "尚無菜單"}</span></div>
+              {!!store.menu.length && <div className="menu-summary-list">
+                {store.menu.slice(0,5).map(item=><span key={item.id}><i>{item.name}</i><b>{money(item.price)}</b></span>)}
+              </div>}
+              {store.menu.length > 5 && <button className="view-all-menu" onClick={()=>openBulkMenu(store.id)}>查看其餘 {store.menu.length-5} 項菜單 →</button>}
             </div>
-            <div className="card-actions"><button onClick={()=>openBulkMenu(store.id)}>＋批次新增菜單</button><button onClick={()=>editStore(store)}>修改店家</button><button className="danger" onClick={()=>deleteStore(store.id)}>刪除</button></div>
+            <div className="card-actions"><button className="menu-manage-button" onClick={()=>openBulkMenu(store.id)}>管理菜單</button><button onClick={()=>editStore(store)}>修改店家</button><button className="danger" onClick={()=>deleteStore(store.id)}>刪除</button></div>
           </article>)}
         </section>
         </>}
@@ -853,22 +857,38 @@ export default function OrderingApp() {
       {bulkMenuStoreId && <div className="modal-backdrop" role="presentation" onMouseDown={event=>event.target===event.currentTarget&&closeBulkMenu()}>
         <section className="bulk-menu-modal" role="dialog" aria-modal="true" aria-labelledby="bulk-menu-title">
           <button className="modal-close" onClick={closeBulkMenu} aria-label="關閉">×</button>
-          <span className="tag">BULK MENU</span>
-          <h2 id="bulk-menu-title">一次輸入全部菜單</h2>
+          <span className="tag">MENU MANAGER</span>
+          <h2 id="bulk-menu-title">管理整間店的菜單</h2>
           <p className="bulk-store-name">{stores.find(store=>store.id===bulkMenuStoreId)?.name}</p>
-          <p className="bulk-help">先輸入分類標題，再逐行輸入「餐點名稱,價格」。同名餐點會更新價格，不會重複新增。</p>
-          <textarea
-            autoFocus
-            value={bulkMenuText}
-            onChange={event=>{setBulkMenuText(event.target.value);setBulkMenuErrors([]);}}
-            placeholder={"麵類\n牛肉麵 小,160\n牛肉麵 大,180\n\n小菜類\n水餃,70"}
-            rows={12}
-          />
-          <div className="format-example"><b>可接受格式</b><span>燒類（分類標題）</span><span>燒肉飯,115</span><span>燒雞排飯，120</span><span>白飯 15</span></div>
+          <p className="bulk-help">左側可一次新增、修改或刪除全部菜單；右側會立即顯示系統辨識的結果。</p>
+          <div className="menu-editor-layout">
+            <div className="menu-editor-pane">
+              <label htmlFor="bulk-menu-input">菜單輸入</label>
+              <textarea
+                id="bulk-menu-input"
+                autoFocus
+                value={bulkMenuText}
+                onChange={event=>{setBulkMenuText(event.target.value);setBulkMenuErrors([]);}}
+                placeholder={"麵類\n牛肉麵 小,160\n牛肉麵 大,180\n\n小菜類\n水餃,70"}
+                rows={18}
+              />
+              <div className="format-example"><b>輸入格式</b><span>燒類（分類標題）</span><span>燒肉飯,115</span><span>燒雞排飯，120</span><span>白飯 15</span></div>
+            </div>
+            <aside className="menu-live-preview">
+              <div className="preview-heading"><b>辨識預覽</b><span>{menuGroups(bulkMenuParsed.items).length} 個分類・{bulkMenuParsed.items.length} 項</span></div>
+              <div className="preview-scroll">
+                {menuGroups(bulkMenuParsed.items).map(group=><div className="preview-category" key={group.category}>
+                  <h4>{group.category}<small>{group.items.length} 項</small></h4>
+                  {group.items.map(item=><div key={`${group.category}-${item.name}`}><span>{item.name}</span><b>{money(item.price)}</b></div>)}
+                </div>)}
+                {!bulkMenuParsed.items.length && <p className="preview-empty">開始輸入後，這裡會顯示整理好的菜單。</p>}
+              </div>
+            </aside>
+          </div>
           {!!bulkMenuErrors.length && <div className="bulk-errors"><b>以下內容格式不正確：</b>{bulkMenuErrors.map(error=><span key={error}>{error}</span>)}</div>}
           <div className="modal-actions">
             <button className="secondary" onClick={closeBulkMenu} disabled={bulkMenuSaving}>取消</button>
-            <button className="primary" onClick={saveBulkMenu} disabled={bulkMenuSaving}>{bulkMenuSaving?"正在儲存…":"一次儲存全部菜單"}</button>
+            <button className="primary" onClick={saveBulkMenu} disabled={bulkMenuSaving}>{bulkMenuSaving?"正在儲存…":`儲存全部菜單（${bulkMenuParsed.items.length} 項）`}</button>
           </div>
         </section>
       </div>}
